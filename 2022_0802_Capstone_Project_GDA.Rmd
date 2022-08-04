@@ -1,0 +1,1027 @@
+---
+title: 'Capstone project: Analysis of stock market assets'
+author: "Roman Nedev"
+date: "2022-08-02"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+**Introduction**
+
+This is a capstone project for the **Google Data Analytics Professional Certificate**([*link*](https://grow.google/certificates/data-analytics/#?modal_active=none)).
+I have chosen to follow my own case study path.
+I'm interested in financial markets.
+My case study will cover analysis of stock market data, portfolio of stocks to be particular.
+
+**Scenario**
+
+You are are an investment/data analyst in a hedge fund.
+One of portfolio managers asks you to analyse portfolio of stocks, calculate performance, visualize your findings and give recommendations on further actions.\
+
+My tool of choise will be R Studio.
+I will prepare, process, analyze, visualize my findings and share them in a form of report.
+In my case study I will rely on materials of the Google Data Analytics Programme (Module 7 especially).
+Also I will use additionsl resources like [Reproducible Finance](http://www.reproduciblefinance.com/).
+The project follows the six step data analysis process: ask, prepare, process, analyze, share, and act.
+
+**Phase 1: Ask** These questions will guide in this case study:
+
+1.  Who is your stakeholder and what is he asking you to accomplish? Portfolio manager. Report on analysis of portfolio of stocks ("PYPL", "SE", "SQ", "SHOP", "MELI").
+2.  What is the main goal of your data analysis? To calculate key metrics of the performance, based on previous 4 years historical data: return, risk and forecast of the portfolio.
+3.  What type of data will be appropriate for the analysis? Data set(in a form of time series) of daily price action of every stock in the portfolio.
+4.  Where will I obtain that data? I will import data from the internet (I will use Yahoo! Finance for this) but it also can be in a form of csv or xls file.
+5.  Who is my audience, and what materials will help me present to them effectively? I will present report in rmd format to the portfolio manager.
+
+I will produce the report with the following deliverables:
+
+1.  A clear statement of the business task I have been asked to investigate.
+2.  A descriptions of all data sources used
+3.  Documentation of any cleaning or manipulation of data
+4.  A summary of my analysis
+5.  Supporting visualizations and key findings
+6.  My top insights based on the analysis
+
+**Phase 2: Prepare** In this section I will obtain raw daily price data on 5 individual stocks and transform it into monthly returns for a single portfolio.
+The Portfolio will consist of the following stocks:
+
+-   PYPL (Paypal) weighted 25%
+-   SE (Sea Limited) weighted 25%
+-   SQ (Block) weighted 20%
+-   SHOP (Shopify) weighted 20%
+-   MELI (MercadoLibre Inc.) weighted 10%
+
+One of the main goals of the analysis is to show returns of the asset in portfolio.
+For this I will make following steps:
+
+1.  Import daily prices from Yahoo! Finance
+2.  Transform daily prices to monthly prices
+3.  Save the data objects for further use and analysis
+
+The following are the packages I will use in my project:
+
+```{r}
+install.packages("tidyverse")
+install.packages("lubridate")
+install.packages("readxl")
+install.packages("highcharter")
+install.packages("tidyquant")
+install.packages("timetk")
+install.packages("tibbletime")
+install.packages("quantmod")
+install.packages("PerformanceAnalytics")
+install.packages("scales")
+install.packages("dplyr")
+install.packages("tidyr")
+install.packages("readr")
+install.packages("tibble")
+install.packages("ggplot2")
+
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(highcharter)
+library(tidyquant)
+library(timetk)
+library(tibbletime)
+library(quantmod)
+library(PerformanceAnalytics)
+library(scales)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(readr)
+library(tibble)
+library(ggplot2)
+
+```
+
+To get the data from the internet we first choose tickers and store them in a vector called symbols.
+
+```{r}
+symbols <- c("PYPL", "SE", "SQ", "SHOP", "MELI")
+```
+
+Then I pass symbols to Yahoo! Finance via the getSymbols() function from the quantmod package.
+This will return an object with the opening price, closing price, adjusted price, daily high, daily low, and daily volume for each ticker.
+My starting date will be "2018-07-31" and an end date "2022-07-31".
+This will give me data set of 4 previous years.
+To isolate the adjusted price, I use the map() function from the purrr package and apply Ad(get(.)) to the imported prices.
+This will get() the adjusted price from each of our individual stocks.
+That (.) refers to our initial object.
+Map() function returns a list by default so we need so we need to use reduce(merge) function to merge the 5 lists into 1 xts object.
+We will have dates as an index and our data will be aligned.
+We can change column names with colnames \<- to rename the columns according to the symbols.
+
+```{r}
+
+prices <- getSymbols(symbols, source = 'yahoo', from = "2018-07-31", to = "2022-07-31") %>% 
+  map(~Ad(get(.))) %>% 
+  reduce(merge) %>% 
+  `colnames<-`(symbols)
+             
+```
+
+Now we can take a look at prices object.
+
+```{r}
+head(prices,10)
+```
+
+**Phase 3: Process** In this part I will:
+
+1.  Transform monthly prices to monthly returns
+2.  Calculate portfolio monthly returns based on asset monthly returns and weights
+3.  Save the data objects for further use and analysis
+
+Next step will be converting daily prices to monthly log returns.
+The first observation in our prices is July 31, 2018.
+We want to convert to those daily prices to monthly log returns based on the last trading day of each month.
+We will use to.monthly(prices, indexAt = "last", OHLC = FALSE) from the quantmod package.
+The argument indexAt = "lastof" tells the function whether we want to index to the first day of the month or the last day.
+If we wanted to use the first day, we would change to "firstof".
+
+```{r}
+prices_monthly <- to.monthly(prices,
+                             indexAt = "lastof",
+                             OHLC = FALSE)
+head(prices_monthly)
+```
+
+We now have readings of the price per month, on the last day of the month.
+
+Now we call Return.calculate (prices.monthly, method = "log") to convert to returns and save as an object called asset_returns_xts.
+This will give us log returns by the method = "log" argument.
+We could have used method = "discrete" to get simple returns.
+
+```{r}
+asset_returns_xts <- 
+  Return.calculate(prices_monthly, method = "log") %>% 
+  na.omit()
+head(asset_returns_xts)
+```
+
+Now we will calculate portfolio monthly returns based on monthly returns of the stocks and their weights.
+We need to create a weights vector that aligns with those allocations.
+
+```{r}
+w <- c(0.25, 0.25, 0.20, 0.20, 0.10)
+```
+
+Let's double check if our weights and symbols are aligned.
+
+```{r}
+tibble(w, symbols)
+```
+
+And don't forget to check the total sum of the weights.
+
+```{r}
+tibble(w, symbols) %>% 
+  summarise(total_weight=sum(w))
+```
+
+The return of a multi-asset portfolio is equal to the sum of the weighted returns of each asset.
+We can implement that by assigning weights to variables according to our weights vector w.
+
+```{r}
+w_1 <- w[1]
+w_2 <- w[2]
+w_3 <- w[3]
+w_4 <- w[4]
+w_5 <- w[5]
+```
+
+We can assign returns by pulling out columns from the asset_returns_xts object and then run the equation.
+
+```{r}
+asset1 <- asset_returns_xts[,1]
+asset2 <- asset_returns_xts[,2]
+asset3 <- asset_returns_xts[,3]
+asset4 <- asset_returns_xts[,4]
+asset5 <- asset_returns_xts[,5]
+portfolio_returns_byhand <- 
+  (w_1*asset1) +
+  (w_2*asset2) +
+  (w_3*asset3) +
+  (w_4*asset4) +
+  (w_5*asset5)
+names(portfolio_returns_byhand) <- "returns"
+head(portfolio_returns_byhand)
+```
+
+Let's calculate portfolio returns using xts now.
+We will use Return.portfolio() from PerformanceAnalytics, to calculate portfolio returns.
+The function requires two arguments for a portfolio, an xts object of returns and a vector of weights.
+It is not necessary but we are also going to set rebalance_on = "months" so we can confirm it matches our by-hand calculations above.
+It is worth mentioning that, in the by-hand calculation, we set the portfolio weights as fixed, meaning they never changed on a month-to-month basis.
+That is equivalent to rebalancing every month.
+In practice, that would be quite rare.
+If we want a more realistic scenario, we could choose annual rebalancing by changing the argument to rebalance_on = "years".
+
+```{r}
+portfolio_returns_xts_rebalanced_monthly <- 
+  Return.portfolio(asset_returns_xts, weights = w,rebalance_on = "months") %>% 
+  `colnames<-`("returns")
+
+head(portfolio_returns_xts_rebalanced_monthly)
+```
+
+We will calculate portfolio returns using tidyverse.
+Further we will also use this calculations in our visualization part with the help of ggplot2 package.
+
+```{r}
+asset_returns_dplyr_byhand <- prices %>%
+  to.monthly(indexAt = "lastof", OHLC = FALSE) %>%
+  # convert the index to a date
+  data.frame(date = index(.)) %>%
+  # now remove the index because it got converted to row names 
+  remove_rownames() %>%
+  gather(asset, prices, -date) %>%
+  group_by(asset) %>%
+  mutate(returns = (log(prices) - log(lag(prices)))) %>%
+  select(-prices) %>%
+  spread(asset, returns) %>%
+  select(date, symbols)
+
+asset_returns_long <- 
+  asset_returns_dplyr_byhand %>% 
+  gather(asset, returns, -date) %>% 
+  group_by(asset)
+
+asset_returns_long %>%
+  group_by(asset) %>%
+  mutate(weights = case_when(asset == symbols[1] ~ w[1],
+                             asset == symbols[2] ~ w[2], 
+                             asset == symbols[3] ~ w[3], 
+                             asset == symbols[4] ~ w[4], 
+                             asset == symbols[5] ~ w[5])) %>%
+  head(5)
+
+```
+
+**Phase 4: Analyze** In this part I will analyze risk profile of our portfolio:
+
+1.  Calculate main indicators of portfolio risk: standard deviation, skewness, kurtosis
+2.  Save the data objects for further use, analysis and visualization.
+
+Let's calculate the standard deviation, skewness and kurtosis of portfolio returns.
+Standard deviation, skewness and kurtosis are descriptive statistics with respect to the variability of portfolio returns, and variability translates to risk for a portfolio.
+
+First, we build a covariance matrix of returns using the cov() function.
+
+```{r}
+covariance_matrix <- cov(asset_returns_xts) 
+round(covariance_matrix, 5)
+```
+
+We now take the square root of the transpose of the weights vector times the covariance matrix times the weights vector.
+To perform matrix multiplication, we use %\*%.
+
+```{r}
+sd_matrix_algebra <- sqrt(t(w) %*% covariance_matrix %*% w)
+sd_matrix_algebra_percent <- round(sd_matrix_algebra * 100, 2) %>% `colnames<-`("standard deviation")
+sd_matrix_algebra_percent[1,]
+```
+
+We can use the built-in StdDev() function from PerformanceAnalytics to go straight from asset returns to portfolio standard deviation.
+It takes two arguments, a vector of returns and weights: StdDev(asset_returns_xts, weights = w).
+
+```{r}
+portfolio_sd_xts_builtin <- StdDev(asset_returns_xts, weights = w)
+portfolio_sd_xts_builtin_percent <- round(portfolio_sd_xts_builtin * 100, 2)
+portfolio_sd_xts_builtin_percent[1,1]
+```
+
+We have calculated the average volatility for the entire life of the portfolio but it would help if we could better understand how that volatility has changed over time or behaved in different market conditions.
+
+We might miss a 3-month or 6-month period where the volatility spiked or plummeted or did both.
+And the longer our portfolio life, the more likely we are to miss something important.
+If we had 10 or 20 years of data and we calculated the standard deviation for the entire history, we could, or most certainly would, fail to notice a period in which volatility was very high, and hence we would fail to ponder the probability that it could occur again.
+We might also want to think about dynamically rebalancing our portfolio to better manage volatility if we are seeing large spikes in the rolling windows.
+
+Let's calculate rolling standard deviation.
+
+The xts world is purpose-built for time series and, as such, calculating rolling standard deviation is straightforward.
+First, we assign a value of 24 to the variable window.
+
+```{r}
+window <- 24
+```
+
+We then invoke rollapply(), pass it our xts returns object, the sd() function, and a rolling window with width = window.
+
+```{r}
+port_rolling_sd_xts <- 
+  rollapply(portfolio_returns_xts_rebalanced_monthly,FUN = sd,width = window) %>%
+  na.omit() %>% `colnames<-`("rolling_sd")
+
+tail(port_rolling_sd_xts)
+```
+
+Now let's take look at *skewness*.
+Skewness is the degree to which returns are asymmetric around their mean.
+Since a normal distribution is symmetric around the mean, skewness can be taken as one measure of how returns are not distributed normally.
+Why does skewness matter?
+If portfolio returns are right, or positively, skewed, it implies numerous small negative returns and a few large positive returns.
+If portfolio returns are left, or negatively, skewed, it implies numerous small positive returns and few large negative returns.
+
+Skewness has important substantive implications for risk and is also a concept that lends itself to data visualization (more visualization in Share part of this report).
+
+To calculate skewness we make use of the skewness() function from PerformanceAnalytics.
+
+```{r}
+skew_xts <- skewness(portfolio_returns_xts_rebalanced_monthly$returns)
+skew_xts
+```
+
+Our portfolio is relatively balanced and shows slight negative skewness, which does not seem cause for major concern.If the skewness is between -0.5 and 0.5, the data is fairly symmetrical.
+
+For the same reasons that we did so with standard deviation, let's check whether we have missed anything unusual in the portfolio's historical tail risk by examining rolling skewness.
+In the xts world, calculating rolling skewness is almost identical to calculating rolling standard deviation, except we call the skewness() function instead of StdDev().
+Since this is a rolling calculation, we need a period of time and will use a 24-month window.
+
+```{r}
+window <- 24
+rolling_skew_xts <- rollapply(portfolio_returns_xts_rebalanced_monthly, FUN = skewness, width = window) %>% 
+  na.omit()
+tail(rolling_skew_xts)
+```
+
+*Kurtosis* is a measure of the degree to which portfolio returns appear in the tails of their distribution.
+A normal distribution has a kurtosis of 3, which follows from the fact that a normal distribution does have some of its mass in its tails.
+A distribution with a kurtosis greater than 3 has more returns in its tails than the normal, and one with kurtosis less than 3 has fewer returns in its tails than the normal.
+That matters to investors because more bad returns in the tails means that our portfolio might be at risk of a rare but huge downside event.
+The terminology is a bit confusing because negative kurtosis actually is less risky because it has fewer returns in the tails.
+
+Kurtosis is often described as negative excess or positive excess, and that is in comparison to a kurtosis of 3.
+A distribution with negative excess kurtosis equal to -1 has an absolute kurtosis of 2, but we subtract 3 from 2 to get to -1.
+Remember, though, the negative kurtosis means fewer returns in the tails and, probably, less risk.
+
+The code flows for calculating kurtosis and rolling kurtosis are quite similar to those for skewness, except we use the built-in kurtosis() function.
+We use the kurtosis() function instead of the skewness() function.
+
+```{r}
+kurt_xts <- kurtosis(portfolio_returns_xts_rebalanced_monthly$returns)
+
+kurt_xts
+```
+
+For kurtosis, the general guideline is that if the number is greater than +1, the distribution is too peaked.
+Likewise, a kurtosis of less than --1 indicates a distribution that is too flat.
+Thus, we can consider our kurtosis to be on normal level.
+Negative kurtosis means fewer returns in the tail, and show probability of our portfolio to have less risk.
+
+Calculating rolling kurtosis with the xts we use the same code flow as we used for skewness, except we replace FUN = skewness with FUN = kurtosis.
+
+```{r}
+window <- 24
+rolling_kurt_xts <- rollapply(portfolio_returns_xts_rebalanced_monthly,
+            FUN = kurtosis,
+            width = window) %>% 
+na.omit()
+
+tail(rolling_kurt_xts)
+```
+
+**Phase 5: Share**
+
+In this part of the report I will focus on visualization of my findings on portfolio analysis.
+
+1.  Visualizing asset returns
+2.  Visualizing portfolio returns
+3.  Visualizing standard deviation and rolling standard deviation
+4.  Visualizing skewness and rolling skewness
+5.  Visualizing kurtosis and rolling kurtosis
+
+For the purposes of visualizing returns, we will work with our monthly log returns object, asset_returns_xts.
+We will work with the highcharter package to visualize the xts formatted returns.
+
+**highcharter** is an R package but highcharts is a JavaScript library.
+The R package is a hook into the JavaScript library.
+Highcharts is fantastic for visualizing time series and it comes with great built-in widgets for viewing different time frames, plus we get to use the power of JavaScript without leaving the world of R code.
+Not only are the visualizations nice, but highcharter "just works" with xts objects in the sense that it reads the index as dates without needing to be told.
+We pass in an xts object and let the package do the rest.
+
+Let's see how it works for charting our asset monthly returns.
+First, we set highchart(type = "stock") to get a nice line format that was purpose-built for stocks.
+Then we add each of our series to the highcharter code flow with hc_add_series(asset_returns_xts[, symbols[1]], name = symbols[1]).
+Notice that we can use our original symbols object to reference the columns.
+This will allow the code to run should we change to different ticker symbols at the outset.
+
+```{r}
+highchart(type = "stock") %>% 
+  hc_title(text = "Monthly Log Returns") %>% 
+  hc_add_series(asset_returns_xts[, symbols[1]],
+                name = symbols[1]) %>% 
+  hc_add_series(asset_returns_xts[, symbols[2]],
+                name = symbols[2]) %>% 
+  hc_add_series(asset_returns_xts[,symbols[3]],
+                name = symbols[3]) %>% 
+  hc_add_series(asset_returns_xts[, symbols[4]],
+                name = symbols[4]) %>%
+  hc_add_series(asset_returns_xts[, symbols[5]], 
+                name = symbols[5]) %>%
+  hc_add_theme(hc_theme_flat()) %>% 
+  hc_navigator(enabled = FALSE) %>% 
+  hc_scrollbar(enabled = FALSE) %>% 
+  hc_exporting(enabled = TRUE) %>% 
+  hc_legend(enabled = TRUE)
+```
+
+We can use ggplot2 to visualize our asset returns.
+*ggplot2* is a very widely-used and flexible visualization package, and it is part of the tidyverse.
+We will use it to build a histogram and have our first look at how tidy data plays nicely with functions in the tidyverse.
+
+```{r}
+asset_returns_long %>%
+ggplot(aes(x = returns, fill = asset)) + geom_histogram(alpha = 0.45, binwidth = .005) + ggtitle("Monthly Returns Since August, 2018")
+```
+
+facet_wrap(\~asset) will break this into 5 charts based on the asset.
+
+```{r}
+asset_returns_long %>%
+  ggplot(aes(x = returns, fill = asset)) +
+  geom_histogram(alpha = 0.45, binwidth = .01) +
+  facet_wrap(~asset) +
+  ggtitle("Monthly Returns Since August 2018") + 
+  theme_update(plot.title = element_text(hjust = 0.5))
+```
+
+Now let's use highcharter to visualize our portfolio returns.
+
+First, we set highchart(type = "stock") to get a nice time series line.
+Then we add our returns column from portfolio_returns_xts_rebalanced_monthly.
+highcharter recognizes the date index so we do not need to point to it.
+
+```{r}
+highchart(type = "stock") %>%
+  hc_title(text = "Portfolio Monthly Returns") %>%
+  hc_add_series(portfolio_returns_xts_rebalanced_monthly$returns,
+                name = "Rebalanced Monthly", color = "cornflowerblue") %>%
+  hc_add_theme(hc_theme_flat()) %>% 
+  hc_navigator(enabled = FALSE) %>% 
+  hc_scrollbar(enabled = FALSE) %>% 
+  hc_legend(enabled = TRUE) %>% 
+  hc_exporting(enabled = TRUE)
+```
+
+Visualizing **standard deviation of portfolio** returns comes down to visualizing the dispersion of portfolio returns.
+
+```{r}
+portfolio_returns_dplyr_byhand <- 
+  asset_returns_long %>%
+  group_by(asset) %>%
+  mutate(weights = case_when(asset == symbols[1] ~ w[1],
+                             asset == symbols[2] ~ w[2], 
+                             asset == symbols[3] ~ w[3], 
+                             asset == symbols[4] ~ w[4],
+                             asset == symbols[5] ~ w[5]),
+         weighted_returns = returns * weights) %>%
+  group_by(date) %>%
+  summarise(returns = sum(weighted_returns))
+
+portfolio_returns_dplyr_byhand %>%
+  ggplot(aes(x = date, y = returns)) +
+  geom_point(color = "cornflowerblue") +
+  scale_x_date(breaks = pretty_breaks(n = 6)) +
+  ggtitle("Scatterplot of Returns by Date") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The scatter plot shows that our portfolio did well in 2019 and 2020, but not so much in 2021 and 2022.
+
+To visualize the **actual standard deviation of our portfolio**, it helps to do so in a comparative manner.
+In this case, we can explore how our portfolio risk compares to the risk of the 5 individual assets.
+First, we return to our asset_returns_long data frame and calculate the standard deviation of each asset's returns with summarise(sd = sd(returns)).
+Then we use dplyr's add_row() to add the portfolio standard deviation from portfolio_sd_tidy_builtin_percent and end with a call to ggplot().
+
+```{r}
+portfolio_returns_tq_rebalanced_monthly <- asset_returns_long %>% 
+  tq_portfolio(assets_col = asset,
+               returns_col = returns,
+               weights     = w,
+               col_rename  = "returns",
+               rebalance_on = "months")
+sd_plot <- sd(portfolio_returns_tq_rebalanced_monthly$returns)
+mean_plot <- mean(portfolio_returns_tq_rebalanced_monthly$returns)
+portfolio_returns_tq_rebalanced_monthly %>% 
+  mutate(hist_col_red =
+           if_else(returns < (mean_plot - sd_plot), 
+                   returns, as.numeric(NA)),
+         hist_col_green =
+           if_else(returns > (mean_plot + sd_plot), 
+                   returns, as.numeric(NA)),
+         hist_col_blue =
+           if_else(returns > (mean_plot - sd_plot) &
+                     returns < (mean_plot + sd_plot), 
+                    returns, as.numeric(NA))) %>%
+  ggplot(aes(x = date)) +
+  geom_point(aes(y = hist_col_red),
+             color = "red") +
+  geom_point(aes(y = hist_col_green),
+             color = "green") +
+  geom_point(aes(y = hist_col_blue),
+           color = "blue") +
+  geom_hline(yintercept = (mean_plot + sd_plot),
+             color = "purple",
+             linetype = "dotted") +
+  geom_hline(yintercept = (mean_plot-sd_plot),
+           color = "purple",
+           linetype = "dotted") +
+  labs(title = "Colored Scatter with Line", y = "monthly returns") + 
+  scale_x_date(breaks = pretty_breaks(n = 8)) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+This scatter plot shows us returns over time and wheather they fall below or above one standard deviation from the mean.
+
+Now let's visualize **rolling standard deviation**.
+For this I will use highcharter.
+First, we convert to our data to rounded percentages for ease of charting.
+
+```{r}
+port_rolling_sd_xts_hc <- 
+  round(port_rolling_sd_xts, 4) * 100
+```
+
+Then we return to the familiar invocation of the highcharter flow.
+
+```{r}
+highchart(type = "stock") %>%
+  hc_title(text = "24-Month Rolling Volatility") %>% 
+  hc_add_series(port_rolling_sd_xts_hc,
+                color = "cornflowerblue") %>% 
+  hc_add_theme(hc_theme_flat()) %>%
+  hc_yAxis(labels = list(format = "{value}%"),
+            opposite = FALSE) %>% 
+  hc_navigator(enabled = FALSE) %>% 
+  hc_scrollbar(enabled = FALSE) %>%
+  hc_exporting(enabled= TRUE) %>% 
+  hc_legend(enabled = TRUE)
+```
+
+We can see that starting from the end of 2021 volatility of our portfolio started to raise.
+
+To visualize skewness, let's start with a histogram of returns and set binwidth = .01 to get fine granularity.
+
+```{r}
+portfolio_returns_tq_rebalanced_monthly %>%
+  ggplot(aes(x = returns)) + 
+  geom_histogram(alpha = .05,binwidth = .01,fill = "cornflowerblue", color = "cornflowerblue") +
+  scale_x_continuous(breaks =pretty_breaks(n = 10))
+```
+
+Negative skewness manifests in more positive returns of the portfolio in our distribution data frame.
+
+Now we can investigate how our portfolio's skewness compares to the 5 assets' skewness.
+The code flow is very similar to the comparison we ran for standard deviation, except we use the skewness function.
+
+```{r}
+skew_tidy <- 
+  portfolio_returns_tq_rebalanced_monthly %>% 
+  summarise(skew_builtin = skewness(returns),
+            skew_byhand =
+(sum((returns - mean(returns))^3)/length(returns))/ 
+((sum((returns - mean(returns))^2)/length(returns)))^(3/2)) %>%
+  select(skew_builtin, skew_byhand)
+
+skew_tidy %>%
+  mutate(xts = coredata(skew_xts)) %>% 
+  mutate_all(funs(round(., 3)))
+
+asset_returns_long %>%
+  summarize(skew_assets = skewness(returns)) %>%
+  add_row(asset = "Portfolio",skew_assets = skew_tidy$skew_byhand)%>%
+  ggplot(aes(x = asset,y = skew_assets,colour = asset)) +
+  geom_point() +
+  geom_text(aes(x = "Portfolio", y=skew_tidy$skew_builtin + .04),label = "Portfolio", color = "cornflowerblue") +
+labs(y = "skewness")
+```
+
+This scatter plot shows that skewness of the portfolio is higher than all of the individual assets except "MELI" and "SE".
+
+For visualizing **rolling skewness** our visualization flow is quit similar to our work on standard deviation.
+We start by passing rolling_skew_xts into highcharter.
+We also tweak our y-axis to capture the nature of the rolling fluctuations by setting the range to between 2 and -2 with hc_yAxis(..., max = 2, min = -2).
+
+```{r}
+highchart(type = "stock") %>%
+  hc_title(text = "Rolling 24-Month Skewness") %>% 
+  hc_add_series(rolling_skew_xts,name = "Rolling skewness",color = "cornflowerblue") %>%
+  hc_yAxis(title = list(text = "skewness"),
+           opposite = FALSE,
+           max = 2,
+           min = -2) %>%
+  hc_navigator(enabled = FALSE) %>%
+  hc_scrollbar(enabled = FALSE) %>%
+  hc_add_theme(hc_theme_flat()) %>% 
+  hc_exporting(enabled = TRUE)
+```
+
+We can see that rolling skewness of the portfolio were stable and started to decline in the beginning of 2022.
+
+For visualizing **kurtosis** we need to calculate density plot first.
+
+```{r}
+portfolio_density_plot <- 
+  portfolio_returns_tq_rebalanced_monthly %>% 
+  ggplot(aes(x = returns)) + 
+  stat_density(geom = "line",
+               alpha = 1,
+               colour = "cornflowerblue")
+```
+
+We are now more interested in both tails, so we shade at 1 standard deviations above and below the mean return (for our skewness work, we shaded the negative tail).
+
+```{r}
+
+median <- 
+  median(portfolio_returns_tq_rebalanced_monthly$returns)
+mean <- 
+  mean(portfolio_returns_tq_rebalanced_monthly$returns)
+
+shaded_area_data <- 
+  ggplot_build(portfolio_density_plot)$data[[1]] %>% 
+  filter(x < mean)
+
+median_line_data <- 
+  ggplot_build(portfolio_density_plot)$data[[1]] %>% 
+  filter(x <= median)
+
+sd_pos <- 
+  mean + 
+  (sd(portfolio_returns_tq_rebalanced_monthly$returns))
+sd_neg <-
+  mean - 
+  (sd(portfolio_returns_tq_rebalanced_monthly$returns))
+
+sd_pos_shaded_area <- ggplot_build(portfolio_density_plot)$data[[1]] %>%
+  filter(x > sd_pos)
+
+sd_neg_shaded_area <- ggplot_build(portfolio_density_plot)$data[[1]] %>%
+  filter(x < sd_neg)
+```
+
+```{r}
+portfolio_density_plot + 
+  geom_area(data = sd_pos_shaded_area,
+            aes(x = x, y = y),
+            fill="pink",
+            alpha = 0.5) +
+  geom_area(data = sd_neg_shaded_area, 
+            aes(x = x, y = y),
+            fill="pink",
+            alpha = 0.5) + 
+  geom_segment(data = shaded_area_data,
+               aes(x = mean, y = 0,xend = mean,yend = density),
+               color = "red",
+               linetype = "dotted") +
+  annotate(geom = "text", 
+           x = mean, 
+           y = 2,
+           label = "mean",
+           color = "red",
+           fontface = "plain",
+           angle = 90,
+           alpha = .8,
+           vjust = -1.75) +
+  geom_segment(data = median_line_data, 
+               aes(x = median,
+                 y = 0,
+                 xend = median,
+                 yend = density),
+               color = "black", 
+               linetype = "dotted") +
+  annotate(geom = "text", 
+           x = median,
+           y = 2,
+           label = "median", 
+           fontface = "plain", 
+           angle = 90,
+           alpha = .8,
+           vjust = 1.75) +
+scale_x_continuous(breaks = pretty_breaks(n = 10))
+
+  
+```
+
+Let's also compare our portfolio kurtosis to the individual assets' kurtosis.
+
+```{r}
+kurt_tidy <- portfolio_returns_tq_rebalanced_monthly %>% 
+  summarise(kurt_builtin = kurtosis(returns), kurt_byhand =((sum((returns - mean(returns))^4)/
+length(returns))/ ((sum((returns - mean(returns))^2)/
+length(returns))^2)) - 3) %>% 
+  select(kurt_builtin, kurt_byhand)
+
+asset_returns_long %>%
+summarize(kurt_assets = kurtosis(returns)) %>% add_row(asset = "Portfolio",
+kurt_assets = kurt_tidy$kurt_byhand) %>% ggplot(aes(x = asset,
+             y = kurt_assets,
+colour = asset)) + geom_point() +
+geom_text(
+aes(x = "Portfolio",
+y=
+kurt_tidy$kurt_byhand + .06),
+label = "Portfolio", color = "cornflowerblue") +
+labs(y = "kurtosis")
+```
+
+For visualizing **rolling kurtozis** we may pop our rolling_kurt_xts object into highcharter for visualization, same as we did for skewness.
+
+```{r}
+highchart(type = "stock") %>%
+  hc_title(text = "Rolling 24-Month kurtosis") %>%
+  hc_add_series(rolling_kurt_xts,
+                name = "Rolling 24-Month kurtosis",
+                color = "cornflowerblue") %>% 
+  hc_yAxis(title = list(text = "kurtosis"),
+           opposite = FALSE) %>% 
+  hc_add_theme(hc_theme_flat()) %>% 
+  hc_navigator(enabled = FALSE) %>% 
+  hc_scrollbar(enabled = FALSE) %>%
+  hc_exporting(enabled = TRUE)
+```
+
+We can see that our rolling kurtosis has been negative for two years but still of normal kind.
+
+Now we will work on visualizing simulation of future returns of our portfolio using **Monte Carlo method**.
+
+Monte Carlo relies on repeated, random sampling from a distribution and we will create that distribution based on two parameters: mean and standard deviation of returns.
+
+To simulate based on mean and standard deviation, I first assign our mean and standard deviation of returns to variables called mean_port_return and stddev_port_return.
+
+```{r}
+mean_port_return <- mean(portfolio_returns_tq_rebalanced_monthly$returns)
+stddev_port_return <- sd(portfolio_returns_tq_rebalanced_monthly$returns)
+```
+
+Then we use the rnorm() function to create a distribution with mean equal to mean_port_return and standard deviation equal to stddev_port_return.
+
+We also must decide how many observations we will simulate for this distribution, meaning how many monthly returns we will simulate.
+I will do 60, it is 5 years.
+
+```{r}
+simulated_monthly_returns <- rnorm(60, mean_port_return, stddev_port_return)
+
+tail(simulated_monthly_returns)
+```
+
+Next, we calculate how a dollar would have grown given those random monthly returns.
+We first add a 1 to each of our monthly returns, because we start with \$1.
+
+```{r}
+simulated_returns_add_1 <- tibble(c(1, 1 + simulated_monthly_returns)) %>% 
+  `colnames<-`("returns")
+head(simulated_returns_add_1, 3)
+```
+
+That data is now ready to be converted into the cumulative growth of a dollar.
+We can use either accumulate() from purrr or cumprod().
+Let's use both of them with mutate() and confirm consistent, reasonable results.
+
+```{r}
+simulated_growth <- simulated_returns_add_1 %>%
+  
+mutate(growth1 = accumulate(returns, function(x, y) x * y), 
+       growth2 = accumulate(returns, `*`),
+       growth3 = cumprod(returns)) %>%
+select(-returns) 
+head(simulated_growth, 3)
+```
+
+We just ran 3 simulations of dollar growth over 60 months.
+We passed in the same monthly returns and that's why we got 3 equivalent results.
+
+Let's see what is the CAGR (compound annual growth rate) of this returns.
+
+```{r}
+cagr <- ((simulated_growth$growth1[nrow(simulated_growth)]^(1/5)) -1)*100
+cagr
+```
+
+Wow!
+The result is quit high.
+We should take into consideration that our portfolio consists of very volatile high growth stocks.
+This simulation implies an annual compounded growth of 38.69125%.
+That seems reasonable since our actual returns have all been taken from a raging bull market of the last few years.
+It is worth mentioning that the above code is a simulation based on sampling from a normal distribution.
+*If you rerun this code on your own, you will get a different result*!
+
+Let's create several different functions that could run the same simulation.
+I will build 3 simulation functions that incorporate the accumulate() and cumprod() workflows above.
+We have confirmed they give consistent results so it's a matter of stylistic preference as to which one is chosen in the end.
+Perhaps you feel that one is more flexible or extensible or fits better with your team's code flows.
+
+Four arguments are required for each of the simulation functions: N for the number of months to simulate (we chose 120 above), init_value for the starting value (we used \$1 above) and the mean-standard deviation pair to create a normal distribution.
+We choose N and init_value, and derive the mean-standard deviation pair from our portfolio monthly returns.
+Here is our first growth simulation function using accumulate().
+
+```{r}
+simulation_accum_1 <- function(init_value, N, mean, stdev) { 
+  tibble(c(init_value, 1 + rnorm(N, mean, stdev))) %>% 
+  `colnames<-`("returns") %>%
+  mutate(growth = accumulate(returns, function(x, y) x * y)) %>%
+  select(growth) 
+  }
+```
+
+Here is a second almost identical simulation function using accumulate().
+
+```{r}
+simulation_accum_2 <- function(init_value, N, mean, stdev) { 
+  tibble(c(init_value, 1 + rnorm(N, mean, stdev))) %>%
+  `colnames<-`("returns") %>%
+  mutate(growth = accumulate(returns, `*`)) %>%
+  select(growth)
+}
+```
+
+Here is a simulation function using cumprod().
+
+```{r}
+simulation_cumprod <- function(init_value, N, mean, stdev) { 
+  tibble(c(init_value, 1 + rnorm(N, mean, stdev))) %>%
+  `colnames<-`("returns") %>% 
+  mutate(growth = cumprod(returns)) %>%
+  select(growth) }
+```
+
+Here is a function that uses those three previous functions, for a fast way to re-confirm consistency.
+
+```{r}
+simulation_confirm_all <- function(init_value, N, mean, stdev) { 
+  tibble(c(init_value, 1 + rnorm(N, mean, stdev))) %>%
+  `colnames<-`("returns") %>%
+  mutate(growth1 = accumulate(returns, function(x, y) x * y),
+         growth2 = accumulate(returns, `*`),
+         growth3 = cumprod(returns)) %>% 
+  select(-returns)
+}
+```
+
+No we can run that confirm_all() function with an init_value of 1, N of 60, and our parameters.
+
+```{r}
+simulation_confirm_all_test <- simulation_confirm_all(1, 60,mean_port_return, stddev_port_return) 
+
+head(simulation_confirm_all_test)
+```
+
+Now we are ready to run more than one simulation using the function of our choice.
+
+Now let's run 100 simulations.
+They will be random and we want to see how they will be distributed.
+First, we need an empty matrix with 100 columns, an initial value of \$1 and intuitive column names.
+
+We will use the rep() function to create 100 columns with a 1 as the value and set_names() to name each column with the appropriate simulation number.
+
+```{r}
+sims <- 100
+starts <- rep(1, sims) %>% 
+  set_names(paste("sim", 1:sims, sep = ""))
+
+tail(starts, 10)
+head(starts, 10)
+```
+
+We now have 100 columns, each of which has a value of 1.
+This is where we will store the results of the 100 simulations.
+Now we want to apply one of our simulation functions (we will go with simulation_accum_1) to each of the 100 columns of the starts matrix.
+We will do that using the map_dfc() function from the purrr package.
+
+map_dfc() takes a vector, in this case the columns of starts, and applies a function to it.
+By appending dfc() to the map\_ function, we are asking the function to store each of its results as the column of a data frame (recall that map_df() does the same thing, but stores results in the rows of a data frame).
+After running the code below, we will have a data frame with 100 columns, one for each of our simulations.
+We do not supply the init_value argument because the init_valueis 1, that same 1 which is in the 100 columns.
+
+```{r}
+monte_carlo_sim_100 <-
+map_dfc(starts, simulation_cumprod,
+          N = 60,
+          mean = mean_port_return,
+          stdev = stddev_port_return) 
+for ( col in 1:ncol(monte_carlo_sim_100)) 
+  colnames(monte_carlo_sim_100)[col] <-  sub(".........", "growth", colnames(monte_carlo_sim_100)[col])
+
+
+tail(monte_carlo_sim_100 %>% 
+  select(growth1, growth2, growth98, growth99), 3)
+```
+
+For out goal of simulations' visualization we need to add month column.
+Let's add that month column with mutate() and give it the same number of rows as our data frame.
+These are months out into the future.
+We will use mutate(month = seq(1:nrow(.))) and then clean up the column names.
+nrow() is equal to the number of rows in our object.
+If we were to change to 120 simulations, that would generate 120 rows, and nrow() would be equal to 120.
+
+```{r}
+monte_carlo_sim_100 <- monte_carlo_sim_100 %>%
+  mutate(month = seq(1:nrow(.))) %>% 
+  select(month, everything()) %>% 
+  `colnames<-`(c("month", names(starts))) %>%
+  mutate_all(funs(round(., 2)))
+
+head(monte_carlo_sim_100 %>% select(month, sim1, sim2, sim98, sim99), 3)
+tail(monte_carlo_sim_100 %>% select(month, sim1, sim2, sim98, sim99), 3)
+```
+
+Now we can visualize our simulations with the help of ggplot2.
+et's get to ggplot() and visualize the results in monte_carlo_sim_100.
+We start with a chart of all 100 simulations and assign a different color to each one by setting ggplot(aes(x = month, y = growth, color = sim)).
+ggplot() will automatically generate a legend for all 100 time series but that gets quite crowded.
+We will suppress the legend with theme(legend.position = "none").
+
+```{r}
+monte_carlo_sim_100 %>%
+  gather(sim, growth, -month) %>%
+  group_by(sim) %>%
+  ggplot(aes(x = month, y = growth, color = sim)) +
+  geom_line() + 
+  theme(legend.position="none")
+  
+```
+
+We can check the minimum, maximum and median simulation with the summarise() function here.
+
+```{r}
+sim_summary <- monte_carlo_sim_100 %>%
+  gather(sim, growth, -month) %>% 
+  group_by(sim) %>%
+  summarise(final = last(growth)) %>% 
+  summarise(max = max(final),
+            median = median(final), 
+            min = min(final))
+sim_summary
+
+monte_carlo_sim_100 %>% 
+  gather(sim, growth, -month) %>%
+  group_by(sim) %>%
+  filter(
+    last(growth) == sim_summary$max||
+    last(growth) == sim_summary$median||
+    last(growth) == sim_summary$min) %>%
+  ggplot(aes(x = month, y = growth)) + 
+  geom_line(aes(color = sim))
+```
+
+```{r}
+mc_gathered <- monte_carlo_sim_100 %>%
+  gather(sim, growth, -month) %>% 
+  group_by(sim)
+
+hchart(mc_gathered, 
+       type = 'line',
+       hcaes(y = growth, x = month,group = sim)) %>% 
+  hc_title(text = "100 Simulations") %>%
+  hc_xAxis(title = list(text = "months")) %>% 
+  hc_yAxis(title = list(text = "dollar growth"),
+           labels = list(format = "${value}")) %>% 
+  hc_add_theme(hc_theme_flat()) %>%
+  hc_exporting(enabled = TRUE) %>% 
+  hc_legend(enabled = FALSE)
+```
+
+Looks nice, but a little bit hard to read.
+We have a lot of simulations.
+
+Let's isolate the maximum, minimum and median simulations and save them to an object called mc_max_med_min.
+
+```{r}
+mc_max_med_min <- mc_gathered %>% 
+  filter(
+      last(growth) == sim_summary$max || 
+      last(growth) == sim_summary$median || 
+      last(growth) == sim_summary$min) %>%
+  group_by(sim)
+
+mc_max_med_min
+
+hchart(mc_max_med_min, 
+       type = 'line',
+       hcaes(y = growth, 
+             x = month,
+             group = sim)) %>%
+  hc_title(text = "Min, Max, Median Simulations") %>% 
+  hc_xAxis(title = list(text = "months")) %>% 
+  hc_yAxis(title = list(text = "dollar growth"),
+           labels = list(format = "${value}")) %>% 
+  hc_add_theme(hc_theme_flat()) %>%
+  hc_exporting(enabled = TRUE) %>% 
+  hc_legend(enabled = FALSE)
+```
+
+That will be it for our share part of data analysis.
+
+**Phase 6: Act**
+
+For further recommendations on the portfolio we might emphasize necessity of calculating risk parity.
+It will help to reduce volatility of the portfolio by focusing on allocation of risk of the assets rather then capital.
